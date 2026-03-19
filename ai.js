@@ -90,7 +90,8 @@ const DazuraAI = (() => {
       { match: /תחזית|forecast|סוף שנה/,               val: 'forecast',  filter:null       },
       { match: /ניצל|used|כמה לקחתי|השתמשתי/,          val: 'used',      filter:null       },
       { match: /מכס[ה?]|quota|מגיע לי/,                val: 'quota',     filter:null       },
-      { match: /חג|holiday|לוח שנה/,                   val: 'holiday',   filter:null       },
+      // חג/holiday — לא נשמר כ-subject כדי לא לחסום שאלות קצרות הבאות
+      // { match: /חג|holiday|לוח שנה/, val: 'holiday', filter:null },
       { match: /מחלק[ה?]|dept|צוות|team/,              val: 'dept',      filter:null       },
       { match: /עובד|employees|צוות|כמה אנשים/,        val: 'employees', filter:null       },
     ];
@@ -101,8 +102,8 @@ const DazuraAI = (() => {
     }
 
     // ── מילות מפתח שמאפסות הקשר — לא להמשיך ──
-    const ctxBreakers = /^(מחלקות|עובדים|ברכות|שלום|תודה|עזרה|help|שבת|חג|שנה טובה|מזל טוב|יום הולדת|להתראות|ביי|bye|בוקר|ערב|לילה)$/;
-    if (ctxBreakers.test(t) || /^(שבת שלום|חג שמח|בוקר טוב|ערב טוב|לילה טוב)/.test(t)) {
+    const ctxBreakers = /^(מחלקות|עובדים|ברכות|שלום|תודה|עזרה|help|שבת|חג|שנה טובה|מזל טוב|יום הולדת|להתראות|ביי|bye|בוקר|ערב|לילה|מתי|חגים|שחיקה|burnout|רשימה|פקודות)$/;
+    if (ctxBreakers.test(t) || /^(שבת שלום|חג שמח|בוקר טוב|ערב טוב|לילה טוב)/.test(t) || /^האם /.test(t) || /^מתי /.test(t)) {
       return { expanded: raw, usedCtx: false };
     }
 
@@ -1119,17 +1120,29 @@ const DazuraAI = (() => {
         return `**מחלקות החברה (${depts.length}):**\n${lines.join('\n')}`;
       }
       case 'NEXT_HOLIDAY': {
-        if (typeof HOLIDAYS === 'undefined') return 'אין מידע על חגים.';
-        const today = dateKey(new Date());
-        const upcoming = Object.entries(HOLIDAYS)
-          .filter(([d]) => d >= today)
-          .sort(([a],[b]) => a.localeCompare(b))
-          .slice(0, 3);
+        // HOLIDAYS קיים ב-script.js עם מפתחות "2026-4-2" (ללא ריפוד)
+        const hObj = typeof HOLIDAYS !== 'undefined' ? HOLIDAYS : null;
+        if (!hObj) {
+          // Fallback: תשובה סטטית מה-KB
+          return 'החגים הקרובים בישראל 2026:\n• פסח — 2 באפריל 🌿\n• יום העצמאות — 22 באפריל 🇮🇱\n• שבועות — 22 במאי\n• ראש השנה — 12 ספטמבר\n• יום כיפור — 21 ספטמבר\n• סוכות — 26 ספטמבר\n• שמחת תורה — 3 אוקטובר';
+        }
+        const todayD = new Date();
+        // נורמליזציה: השווה לפי שנה-חודש-יום (ללא ריפוד)
+        const todayUnpad = todayD.getFullYear()+'-'+( todayD.getMonth()+1)+'-'+todayD.getDate();
+        const normKey = k => { const p=k.split('-'); return p[0]+'-'+parseInt(p[1])+'-'+parseInt(p[2]); };
+        const todayNum = todayD.getFullYear()*10000+(todayD.getMonth()+1)*100+todayD.getDate();
+        const upcoming = Object.entries(hObj)
+          .map(([d,h]) => { const p=d.split('-'); return [d,h,parseInt(p[0])*10000+parseInt(p[1])*100+parseInt(p[2])]; })
+          .filter(([,, num]) => num >= todayNum)
+          .sort(([,,a],[,,b]) => a-b)
+          .slice(0, 5);
         if (!upcoming.length) return 'אין חגים קרובים ברשומות.';
-        return `**החגים הקרובים:**\n${upcoming.map(([d,h]) => {
-          const parts = d.split('-');
-          return `• **${h.n}** — ${parts[2]}/${parts[1]}/${parts[0]}${h.half?' (חצי יום)':''}`;
-        }).join('\n')}`;
+        const lines = upcoming.map(([d,h]) => {
+          const p = d.split('-');
+          const blocked = h.blocked ? ' 🚫 יום חג רשמי' : h.half ? ' (ערב חג — חצי יום)' : '';
+          return '• **'+h.n+'** — '+p[2]+'/'+p[1]+'/'+p[0]+blocked;
+        });
+        return '**החגים הקרובים:**\n'+lines.join('\n');
       }
       case 'VACATIONS': {
         const vacs = db.vacations?.[user.username] || {};
@@ -1238,6 +1251,10 @@ const DazuraAI = (() => {
     if (/חופש|חופשה|יתרה|ימים/.test(t))
       return respondBalance(user, db, new Date().getFullYear());
 
+    if (/שחיקה|burnout|לא לקח.*חופש|ללא חופש|סיכון שחיקה|מי בסיכון|90 יום|לא לקחו חופשה/.test(t)) {
+      return respondBurnout(db);
+    }
+
     // Fuse: נסה למצוא עובד/מחלקה בטקסט גם ב-fallback
     const empUsername = fuzzyFindEmployee(raw, db);
     if (empUsername && db.users[empUsername]) {
@@ -1284,7 +1301,7 @@ const DazuraAI = (() => {
     const t = norm(raw);
 
     // ── עזרה ───────────────────────────────────────────────
-    if (/^(מה יכול|מה אתה יכול|מה ניתן|מה אפשר|עזרה|help)/.test(t)) return 'help';
+    if (/^(מה יכול|מה אתה יכול|מה ניתן|מה אפשר|עזרה|help|רשימת פקודות|פקודות|תפריט|מה אתה עושה)/.test(t)) return 'help';
 
     // ── יתרה ───────────────────────────────────────────────
     // שאלה על עובד ספציפי — לא לתפוס כ-balance (יטופל ב-runLiveData)
@@ -1333,13 +1350,14 @@ const DazuraAI = (() => {
 
     // ── בקשות ──────────────────────────────────────────────
     if (/^(מה יש לי|מה הבקשות שלי|בקשות שלי|הבקשות שלי)$/.test(t)) return 'requests';
-    if (/^(בקשות? ממתינות?|מה מחכה לאישור|מה לאשר)$/.test(t)) return 'pending';
+    if (/^(בקשות? ממתינות?|מה מחכה לאישור|מה לאשר|יש בקשות ממתינות|הבקשות הפתוחות|בקשות פתוחות|מה הבקשות הפתוחות)$/.test(t)) return 'pending';
 
     // ── מנהל ───────────────────────────────────────────────
     if (/^(מי המנהל שלי|מי הבוס שלי|מי מנהל המחלקה)$/.test(t)) return 'my_manager';
 
     // ── מצב הצוות ──────────────────────────────────────────
     if (/^(מצב הצוות|מצב הצוות היום|מה מצב הצוות)$/.test(t)) return 'team_status';
+    if (/שחיקה|burnout|לא לקח חופש|ללא חופש|סיכון שחיקה|מי בסיכון|לא לקחו חופשה|90 יום/.test(t)) return 'burnout';
 
     // ── חופשות קרובות ──────────────────────────────────────
     if (/^(חופשות? קרוב|החופשה הבאה|מתי חופשה|תוכניות)$/.test(t)) return 'upcoming_vacations';
@@ -1605,6 +1623,11 @@ const DazuraAI = (() => {
       r = `**${fn(currentUser)}**, היום (${new Date().toLocaleDateString('he-IL')}) אתה **${word}**.` +
           (cb ? `\nיתרת חופשה: **${cb.balance.toFixed(1)} ימים**` : '');
       ctx.subject = 'status_today'; ctx.dateInfo = todayDi;
+    }
+
+    else if (intent === 'burnout') {
+      r = respondBurnout(db);
+      ctx.subject = 'employees';
     }
 
     // שמור נושא מ-intent ב-ctx
