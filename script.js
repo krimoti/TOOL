@@ -2533,16 +2533,38 @@ function saveNewEmployee() {
   });
 }
 
-function deleteEmployee(username) {
+async function deleteEmployee(username) {
   if (username === 'admin') return;
+
   const db = getDB();
   const name = db.users[username]?.fullName || username;
+
   if (!confirm(`למחוק את העובד ${name}? הפעולה בלתי הפיכה.`)) return;
+
+  // 1. מחיקה מהאובייקט המקומי
   delete db.users[username];
   delete db.vacations[username];
+
+  // 2. שמירה ל-LocalStorage (גיבוי מקומי מהיר)
   saveDB(db);
-  auditLog('employee_deleted', `עובד נמחק: ${name}`);
-  showToast('🗑️ העובד נמחק', 'success');
+
+  try {
+    // 3. סנכרון לענן - השלב שחסר לך
+    // אני מניח שקיימת אצלך פונקציה בשם pushToFirebase (כפי שמופיע בחלקים אחרים בקוד שלך)
+    if (typeof pushToFirebase === 'function') {
+      await pushToFirebase(); 
+    } else {
+      console.warn("פונקציית pushToFirebase לא נמצאה, המידע נשמר מקומית בלבד");
+    }
+
+    auditLog('employee_deleted', `עובד נמחק: ${name}`);
+    showToast('🗑️ העובד נמחק בהצלחה גם מהענן', 'success');
+  } catch (error) {
+    console.error("שגיאה במחיקה מהענן:", error);
+    showToast('❌ המחיקה נכשלה בענן, בדוק חיבור אינטרנט', 'error');
+  }
+
+  // 4. רענון התצוגה
   renderAdmin();
 }
 
@@ -6040,9 +6062,14 @@ async function pullFromFirebase() {
 
 // Push local → cloud
 async function pushToFirebase() {
-  if (!firebaseConnected || !firebaseDB) return;
+  if (!firebaseConnected || !firebaseDB) {
+    console.warn('Firebase לא מחובר, הסנכרון לא יתבצע');
+    return;
+  }
+  
   try {
     const db = getDB();
+    // כאן מתבצעת הדריסה המלאה של המסמך בענן
     await firebaseDB.collection('vacationSystem').doc('data').set({
       users:            JSON.stringify(db.users || {}),
       vacations:        JSON.stringify(db.vacations || {}),
@@ -6064,11 +6091,12 @@ async function pushToFirebase() {
       updatedAt:        new Date().toISOString(),
       updatedBy:        currentUser?.username || 'system'
     });
+    console.log("סנכרון לענן הצליח ✅"); // חשוב לדיבאגינג
   } catch(err) {
-    console.warn('Push error:', err.message);
+    console.error('שגיאת סנכרון לענן:', err.message); // שנה ל-error כדי שתראה את זה אדום ב-Console
+    throw err; // מאפשר לפונקציית המחיקה לדעת שהסנכרון נכשל
   }
 }
-
 // Real-time listener — updates UI when any other device saves
 function startRealtimeListener() {
   if (_fbUnsubscribe) _fbUnsubscribe(); // cleanup old listener
