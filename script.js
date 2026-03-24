@@ -6085,7 +6085,7 @@ async function pushToFirebase() {
       departments:      JSON.stringify(db.departments || []),
       approvalRequests: JSON.stringify(db.approvalRequests || []),
       deptManagers:     JSON.stringify(db.deptManagers || {}),
-      auditLog:         JSON.stringify((db.auditLog || []).slice(0, 200)),
+      auditLog:         JSON.stringify((db.auditLog || []).slice(0, 50)),
       settings:         JSON.stringify(db.settings || {}),
       permissions:      JSON.stringify(db.permissions || {}),
       announcements:    JSON.stringify(db.announcements || []),
@@ -6104,9 +6104,10 @@ async function pushToFirebase() {
     console.log("סנכרון סופי לענן בוצע בהצלחה ✅");
   } catch(err) {
     console.error('Push error:', err.message);
-    throw err; // חשוב כדי שה-Toast ידע להציג שגיאה אם זה נכשל באמת
+    // במקום warn, אנחנו עוצרים הכל ומדווחים למשתמש
+    showToast('❌ שגיאת ענן: המסמך מלא מדי או שאין מכסה', 'error');
+    throw err; // זה ימנע מה-Toast של ה"הצלחה" להופיע
   }
-}
 // Real-time listener — updates UI when any other device saves
 function startRealtimeListener() {
   if (_fbUnsubscribe) _fbUnsubscribe(); // cleanup old listener
