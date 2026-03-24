@@ -2533,17 +2533,30 @@ function saveNewEmployee() {
   });
 }
 
-function deleteEmployee(username) {
+async function deleteEmployee(username) {
   if (username === 'admin') return;
   const db = getDB();
   const name = db.users[username]?.fullName || username;
+  
   if (!confirm(`למחוק את העובד ${name}? הפעולה בלתי הפיכה.`)) return;
+
+  // מחיקה מהאובייקט המקומי
   delete db.users[username];
-  delete db.vacations[username];
-  saveDB(db);
-  auditLog('employee_deleted', `עובד נמחק: ${name}`);
-  showToast('🗑️ העובד נמחק', 'success');
-  renderAdmin();
+  if (db.vacations) delete db.vacations[username];
+
+  try {
+    // חשוב: להוסיף await לפני saveDB
+    await saveDB(db); 
+    
+    if (typeof auditLog === 'function') auditLog('employee_deleted', `עובד נמחק: ${name}`);
+    showToast('🗑️ העובד נמחק בהצלחה', 'success');
+    renderAdmin();
+  } catch (error) {
+    console.error("המחיקה נכשלה בשרת:", error);
+    showToast('⚠️ שגיאה: המחיקה לא נשמרה ב-Firebase', 'error');
+    // טעינה מחדש כדי להחזיר את המצב הקיים בשרת למסך
+    setTimeout(() => location.reload(), 2000);
+  }
 }
 
 // ============================================================
