@@ -6062,10 +6062,27 @@ async function pullFromFirebase() {
 
 // Push local → cloud
 async function pushToFirebase() {
-  if (!firebaseConnected || !firebaseDB) {
-    console.warn('Firebase לא מחובר, הסנכרון לא יתבצע');
-    return;
+  if (!firebaseConnected || !firebaseDB) return;
+  
+  try {
+    // ודא שאנחנו מושכים את הנתונים מה-localStorage שנכתבו הרגע ב-saveDB
+    const rawData = localStorage.getItem(DB_KEY);
+    if (!rawData) return;
+    const db = JSON.parse(rawData); 
+
+    await firebaseDB.collection('vacationSystem').doc('data').set({
+      users:            JSON.stringify(db.users || {}),
+      vacations:        JSON.stringify(db.vacations || {}),
+      // ... שאר השורות שלך כפי שהן ...
+      updatedAt:        new Date().toISOString(),
+      updatedBy:        currentUser?.username || 'system'
+    });
+    console.log("סנכרון סופי לענן בוצע ✅");
+  } catch(err) {
+    console.error('Push error:', err.message);
+    throw err;
   }
+}
   
   try {
     const db = getDB();
