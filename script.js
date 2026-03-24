@@ -7446,15 +7446,22 @@ function importCustomQA(input) {
           }
         });
       }
+saveDB(db);
+      
+      // שינוי כאן: מחכים לסנכרון ומטפלים בשגיאה במקום להתעלם
+      showToast('⏳ מסנכרן לענן...', 'info');
+      
+      pushToFirebase()
+        .then(() => {
+          showToast('✅ יובאו ' + added + ' שאלות וסונכרנו לענן', 'success');
+          renderCustomQAList();
+        })
+        .catch((err) => {
+          console.error("סנכרון נכשל:", err);
+          showToast('⚠️ השאלות נשמרו מקומית בלבד: ' + err.message, 'warning');
+          renderCustomQAList();
+        });
 
-      saveDB(db);
-      pushToFirebase().catch(() => {});
-      showToast('✅ יובאו ' + added + ' שאלות', 'success');
-      renderCustomQAList();
     } catch(err) {
       showToast('❌ שגיאה בקריאת הקובץ: ' + err.message, 'error');
     }
-  };
-  reader.readAsText(file, 'utf-8');
-  input.value = '';
-}
